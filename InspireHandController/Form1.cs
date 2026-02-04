@@ -258,7 +258,7 @@ namespace InspireHandController
 			else
 			{
 				float bendFactor = AngleToBendFactor(angles[4]);
-				float rotationFactor = angles[5] / 1000f;
+				float rotationFactor = (670 - angles[5]) / 1000f;
 
 				float rotAngle = (float)(Math.PI * 0.3 + rotationFactor * Math.PI * 0.5);
 				float bendAngle = bendFactor * (float)(Math.PI * 0.5);
@@ -268,14 +268,14 @@ namespace InspireHandController
 				float cosBend = (float)Math.Cos(bendAngle);
 				float sinBend = (float)Math.Sin(bendAngle);
 
-				float px = THUMB_PROXIMAL * sinRot * cosBend;
-				float py = THUMB_PROXIMAL * cosRot * cosBend;
-				float pz = THUMB_PROXIMAL * sinBend;
+				float px = THUMB_PROXIMAL * cosRot * cosBend;
+				float py = THUMB_PROXIMAL * sinBend;
+				float pz = THUMB_PROXIMAL * sinRot * cosBend;
 
 				float totalBend = bendAngle * 1.5f;
-				float dx = THUMB_DISTAL * sinRot * (float)Math.Cos(totalBend);
-				float dy = THUMB_DISTAL * cosRot * (float)Math.Cos(totalBend);
-				float dz = THUMB_DISTAL * (float)Math.Sin(totalBend);
+				float dx = THUMB_DISTAL * cosRot * (float)Math.Cos(totalBend);
+				float dy = THUMB_DISTAL * (float)Math.Sin(totalBend);
+				float dz = THUMB_DISTAL * sinRot * (float)Math.Cos(totalBend);
 
 				return new Point3D(basePos.X + px + dx, basePos.Y + py + dy, basePos.Z + pz + dz);
 			}
@@ -650,6 +650,13 @@ namespace InspireHandController
 		private Point _lastMouse;
 		private float _autoRotation = 0f;
 		private bool _autoRotate = false;
+		private bool _isLeftHand = false;
+
+		public bool IsLeftHand
+		{
+			get => _isLeftHand;
+			set { _isLeftHand = value; Invalidate(); }
+		}
 
 		public Object3DVisualizationPanel()
 		{
@@ -746,10 +753,12 @@ namespace InspireHandController
 			const int THRESHOLD = 80;
 
 			Point3D basePos = region == "tip"
-				? HandKinematics.ComputeFingertipPosition(_currentAngles, fingerIndex)
-				: HandKinematics.ComputeFingerPadPosition(_currentAngles, fingerIndex);
+				? GetAdjustedFingertipPosition(_currentAngles, fingerIndex)
+				: GetAdjustedFingerPadPosition(_currentAngles, fingerIndex);
 
 			Point3D fingerDir = HandKinematics.GetFingerDirection(_currentAngles, fingerIndex);
+			if (_isLeftHand)
+				fingerDir = new Point3D(-fingerDir.X, fingerDir.Y, fingerDir.Z);
 
 			Point3D perpX = new Point3D(1, 0, 0);
 			if (Math.Abs(Point3D.Dot(fingerDir, perpX)) > 0.9f)
@@ -772,7 +781,8 @@ namespace InspireHandController
 						float offsetZ = (r - rows / 2f) / rows * spreadZ;
 
 						Point3D contactPos = basePos + perpX * offsetX + perpZ * offsetZ;
-						Point3D normal = (HandKinematics.GetPalmCenter() - contactPos).Normalized;
+						Point3D palmCenter = GetAdjustedPalmCenter();
+						Point3D normal = (palmCenter - contactPos).Normalized;
 
 						_contactPoints.Add(new ContactPoint3D
 						{
@@ -792,7 +802,7 @@ namespace InspireHandController
 			if (data == null || data.Length < rows * cols) return;
 
 			const int THRESHOLD = 80;
-			Point3D palmCenter = HandKinematics.GetPalmCenter();
+			Point3D palmCenter = GetAdjustedPalmCenter();
 
 			for (int r = 0; r < rows; r++)
 			{
@@ -833,15 +843,19 @@ namespace InspireHandController
 
 		private PointF Project3D(Point3D p, int centerX, int centerY, float scale)
 		{
+			Point3D point = p;
+			if (_isLeftHand)
+				point = new Point3D(-p.X, p.Y, p.Z);
+
 			float totalRotY = _rotationY + (_autoRotate ? _autoRotation : 0);
 			float cosY = (float)Math.Cos(totalRotY);
 			float sinY = (float)Math.Sin(totalRotY);
 			float cosX = (float)Math.Cos(_rotationX);
 			float sinX = (float)Math.Sin(_rotationX);
 
-			float x1 = p.X * cosY - p.Y * sinY;
-			float y1 = p.X * sinY + p.Y * cosY;
-			float z1 = p.Z;
+			float x1 = point.X * cosY - point.Y * sinY;
+			float y1 = point.X * sinY + point.Y * cosY;
+			float z1 = point.Z;
 			float y2 = y1 * cosX - z1 * sinX;
 			float z2 = y1 * sinX + z1 * cosX;
 
@@ -851,13 +865,58 @@ namespace InspireHandController
 
 		private float GetDepth(Point3D p)
 		{
+			Point3D point = p;
+			if (_isLeftHand)
+				point = new Point3D(-p.X, p.Y, p.Z);
+
 			float totalRotY = _rotationY + (_autoRotate ? _autoRotation : 0);
 			float cosY = (float)Math.Cos(totalRotY);
 			float sinY = (float)Math.Sin(totalRotY);
 			float cosX = (float)Math.Cos(_rotationX);
 			float sinX = (float)Math.Sin(_rotationX);
-			float y1 = p.X * sinY + p.Y * cosY;
-			return y1 * cosX - p.Z * sinX;
+			float y1 = point.X * sinY + point.Y * cosY;
+			return y1 * cosX - point.Z * sinX;
+		}
+
+		private Point3D GetAdjustedFingertipPosition(short[] angles, int fingerIndex)
+		{
+			var pos = HandKinematics.ComputeFingertipPosition(angles, fingerIndex);
+			if (_isLeftHand)
+				pos = new Point3D(-pos.X, pos.Y, pos.Z);
+			return pos;
+		}
+
+		private Point3D GetAdjustedFingerPadPosition(short[] angles, int fingerIndex)
+		{
+			var pos = HandKinematics.ComputeFingerPadPosition(angles, fingerIndex);
+			if (_isLeftHand)
+				pos = new Point3D(-pos.X, pos.Y, pos.Z);
+			return pos;
+		}
+
+		private Point3D GetAdjustedPalmCenter()
+		{
+			var pos = HandKinematics.GetPalmCenter();
+			if (_isLeftHand)
+				pos = new Point3D(-pos.X, pos.Y, pos.Z);
+			return pos;
+		}
+
+		private Point3D GetAdjustedFingerBase(int fingerIndex)
+		{
+			var bases = new Point3D[]
+			{
+				new Point3D(-35, 0, 0),
+				new Point3D(-17, 8, 0),
+				new Point3D(0, 12, 0),
+				new Point3D(17, 8, 0),
+				new Point3D(32, -15, -8),
+			};
+
+			var pos = bases[fingerIndex];
+			if (_isLeftHand)
+				pos = new Point3D(-pos.X, pos.Y, pos.Z);
+			return pos;
 		}
 
 		private void OnMouseDown(object sender, MouseEventArgs e)
@@ -933,16 +992,26 @@ namespace InspireHandController
 
 		private void DrawAxes(Graphics g, int cx, int cy, float scale)
 		{
-			float axisLen = 15f;
-			using (var pen = new Pen(Color.FromArgb(40, 255, 255, 255), 1) { DashStyle = DashStyle.Dot })
+			float axisLen = 40f;
+			Point3D axisOrigin = new Point3D(75, 50, 30);
+			var origin = Project3D(axisOrigin, cx, cy, scale);
+
+			using (var penX = new Pen(Color.FromArgb(255, 220, 80, 80), 2.5f))
+			using (var penY = new Pen(Color.FromArgb(255, 80, 220, 80), 2.5f))
+			using (var penZ = new Pen(Color.FromArgb(255, 80, 80, 220), 2.5f))
+			using (var font = new Font("Segoe UI", 9, FontStyle.Bold))
 			{
-				var origin = Project3D(new Point3D(0, 0, 0), cx, cy, scale);
-				pen.Color = Color.FromArgb(60, 255, 80, 80);
-				g.DrawLine(pen, origin, Project3D(new Point3D(axisLen, 0, 0), cx, cy, scale));
-				pen.Color = Color.FromArgb(60, 80, 255, 80);
-				g.DrawLine(pen, origin, Project3D(new Point3D(0, axisLen, 0), cx, cy, scale));
-				pen.Color = Color.FromArgb(60, 80, 80, 255);
-				g.DrawLine(pen, origin, Project3D(new Point3D(0, 0, axisLen), cx, cy, scale));
+				var xEnd = Project3D(axisOrigin + new Point3D(axisLen, 0, 0), cx, cy, scale);
+				var yEnd = Project3D(axisOrigin + new Point3D(0, axisLen, 0), cx, cy, scale);
+				var zEnd = Project3D(axisOrigin + new Point3D(0, 0, axisLen), cx, cy, scale);
+
+				g.DrawLine(penX, origin, xEnd);
+				g.DrawLine(penY, origin, yEnd);
+				g.DrawLine(penZ, origin, zEnd);
+
+				g.DrawString("X", font, new SolidBrush(Color.FromArgb(255, 220, 80, 80)), xEnd.X + 5, xEnd.Y - 10);
+				g.DrawString("Y", font, new SolidBrush(Color.FromArgb(255, 80, 220, 80)), yEnd.X - 15, yEnd.Y - 10);
+				g.DrawString("Z", font, new SolidBrush(Color.FromArgb(255, 80, 80, 220)), zEnd.X + 5, zEnd.Y - 10);
 			}
 		}
 
@@ -952,17 +1021,19 @@ namespace InspireHandController
 			using (var jointBrush = new SolidBrush(Color.FromArgb(80, 150, 160, 170)))
 			{
 				Point3D[] palmCorners = { new Point3D(-38, -5, 5), new Point3D(25, -5, 5), new Point3D(30, 15, 5), new Point3D(-38, 10, 5) };
+				if (_isLeftHand)
+					for (int i = 0; i < palmCorners.Length; i++)
+						palmCorners[i] = new Point3D(-palmCorners[i].X, palmCorners[i].Y, palmCorners[i].Z);
+
 				PointF[] palmPoly = palmCorners.Select(p => Project3D(p, cx, cy, scale)).ToArray();
 				using (var palmBrush = new SolidBrush(Color.FromArgb(30, 100, 110, 120)))
 					g.FillPolygon(palmBrush, palmPoly);
 
-				Point3D[] fingerBases = { new Point3D(-35, 0, 0), new Point3D(-17, 8, 0), new Point3D(0, 12, 0), new Point3D(17, 8, 0), new Point3D(32, -15, -8) };
-
 				for (int i = 0; i < 5; i++)
 				{
-					var baseScreen = Project3D(fingerBases[i], cx, cy, scale);
-					var padScreen = Project3D(HandKinematics.ComputeFingerPadPosition(angles, i), cx, cy, scale);
-					var tipScreen = Project3D(HandKinematics.ComputeFingertipPosition(angles, i), cx, cy, scale);
+					var baseScreen = Project3D(GetAdjustedFingerBase(i), cx, cy, scale);
+					var padScreen = Project3D(GetAdjustedFingerPadPosition(angles, i), cx, cy, scale);
+					var tipScreen = Project3D(GetAdjustedFingertipPosition(angles, i), cx, cy, scale);
 
 					g.DrawLine(bonePen, baseScreen, padScreen);
 					g.DrawLine(bonePen, padScreen, tipScreen);
@@ -1404,11 +1475,11 @@ namespace InspireHandController
 			GroupBox grpActions = new GroupBox { Text = "Quick Actions", Location = new Point(730, 10), Size = new Size(500, 100) };
 			this.Controls.Add(grpActions);
 
-			btnOpenHand = new Button { Text = "Open Hand", Location = new Point(10, 25), Size = new Size(100, 30) };
+			btnOpenHand = new Button { Text = "Release Grip", Location = new Point(10, 25), Size = new Size(100, 30) };
 			btnOpenHand.Click += BtnOpenHand_Click;
 			grpActions.Controls.Add(btnOpenHand);
 
-			btnCloseHand = new Button { Text = "Close Hand", Location = new Point(120, 25), Size = new Size(100, 30) };
+			btnCloseHand = new Button { Text = "Grip Object", Location = new Point(120, 25), Size = new Size(100, 30) };
 			btnCloseHand.Click += BtnCloseHand_Click;
 			grpActions.Controls.Add(btnCloseHand);
 
@@ -1423,6 +1494,10 @@ namespace InspireHandController
 			chkMirrorControl = new CheckBox { Text = "Send Tracking to Hand", Location = new Point(240, 30), AutoSize = true, Checked = false };
 			grpActions.Controls.Add(chkMirrorControl);
 			grpActions.Controls.Add(new Label { Text = "(Uses Python + MediaPipe)", Location = new Point(240, 55), AutoSize = true, ForeColor = Color.Gray });
+
+			CheckBox chkLeftHand = new CheckBox { Text = "Left Hand", Location = new Point(240, 75), AutoSize = true, Checked = false };
+			chkLeftHand.CheckedChanged += (s, e) => panel3DObject.IsLeftHand = chkLeftHand.Checked;
+			grpActions.Controls.Add(chkLeftHand);
 
 			// Finger Sliders Group
 			GroupBox grpFingers = new GroupBox { Text = "Finger Control (Target / Actual)", Location = new Point(10, 120), Size = new Size(350, 250) };
@@ -1455,17 +1530,15 @@ namespace InspireHandController
 			grpTactile.Controls.Add(panelTactile);
 			SetupTactileGrids();
 
-			// 3D Object Visualization
-			GroupBox grpObjectVis = new GroupBox { Text = "3D Object Recognition", Location = new Point(1240, 120), Size = new Size(220, 350) };
+			// 3D Object Visualization (moved to bottom)
+			GroupBox grpObjectVis = new GroupBox { Text = "3D Object Recognition", Location = new Point(10, 480), Size = new Size(1450, 390), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom };
 			this.Controls.Add(grpObjectVis);
-			panel3DObject = new Object3DVisualizationPanel { Location = new Point(10, 20), Size = new Size(200, 320) };
+			panel3DObject = new Object3DVisualizationPanel { Location = new Point(10, 20), Size = new Size(1430, 360), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom };
 			grpObjectVis.Controls.Add(panel3DObject);
 
-			// Log
-			GroupBox grpLog = new GroupBox { Text = "Information", Location = new Point(10, 480), Size = new Size(1450, 390), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom };
-			this.Controls.Add(grpLog);
-			txtLog = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Location = new Point(10, 20), Size = new Size(1430, 360), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom, Font = new Font("Consolas", 9) };
-			grpLog.Controls.Add(txtLog);
+			// Log (hidden)
+			txtLog = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical, Location = new Point(10, 20), Size = new Size(1430, 360), Anchor = AnchorStyles.Top | AnchorStyles.Left | AnchorStyles.Right | AnchorStyles.Bottom, Font = new Font("Consolas", 9), Visible = false };
+			this.Controls.Add(txtLog);
 
 			Log("=== Inspire Robotics Dexterous Hand Controller ===");
 			Log("Now using TACTILE CURVATURE ANALYSIS for shape recognition!");
@@ -1870,16 +1943,25 @@ namespace InspireHandController
 
 		private async void BtnOpenHand_Click(object sender, EventArgs e)
 		{
-			Log("Opening hand...");
+			Log("Releasing grip...");
 			for (int i = 0; i < 6; i++) { _targetAngles[i] = 1000; fingerSliders[i].Value = 1000; }
 			await SetAnglesAsync(_targetAngles);
 		}
 
 		private async void BtnCloseHand_Click(object sender, EventArgs e)
 		{
-			Log("Closing hand...");
+			Log("Gripping object...");
+			
+			// First, move thumb rotation to 0 position
+			_targetAngles[5] = 0;
+			fingerSliders[5].Value = 0;
+			await SetAnglesAsync(_targetAngles);
+			
+			// Wait a moment for thumb to rotate
+			await Task.Delay(500);
+			
+			// Then bend all DOFs
 			for (int i = 0; i < 5; i++) _targetAngles[i] = 0;
-			_targetAngles[5] = 500;
 			for (int i = 0; i < 6; i++) fingerSliders[i].Value = _targetAngles[i];
 			await SetAnglesAsync(_targetAngles);
 		}
